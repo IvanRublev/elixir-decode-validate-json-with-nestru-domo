@@ -21,7 +21,7 @@ defmodule ExampleJsonParse do
     binary = File.read!(file_path)
 
     with {:ok, map} <- Jason.decode(binary),
-         {:ok, catalog} = Nestru.from_map(map, ProductCatalog, locale: "en-US"),
+         {:ok, catalog} <- Nestru.from_map(map, ProductCatalog, locale: "en-US"),
          {:ok, catalog} <- ProductCatalog.ensure_type_ok(catalog),
          catalog = to_products_list(catalog) do
       {:ok, catalog}
