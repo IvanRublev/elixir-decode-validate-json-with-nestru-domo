@@ -14,13 +14,13 @@ preconditions.
 
 ## In detail
 
-The Domo generated callbacks `ensure_type_ok/1` and `new!/1` are used 
+The Domo generated callbacks `ensure_type/1` and `new!/1` are used 
 to validate structs conforming to their types and preconditions. 
 The `Core.Product.Image.uri()` type from core model referenced in 
 `JsonReply.ProductCatalog.ImageAsset.t()` lifts the type and precondition 
 checks to the product catalog. 
 
-That is the call to `ProductCatalog.ensure_type_ok/1` validates uri fields
+That is the call to `ProductCatalog.ensure_type/1` validates uri fields
 of image assets with precondition function for core type `uri()` 
 that requires `URI` value to have both `host` and `path` fields specified.
 
