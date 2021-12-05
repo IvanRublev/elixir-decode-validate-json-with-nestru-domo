@@ -6,7 +6,7 @@ defmodule ExampleJsonParse.MixProject do
       app: :example_json_parse,
       version: "0.1.0",
       elixir: "~> 1.11",
-      compilers: Mix.compilers() ++ [:domo_compiler],
+      compilers: [:domo_compiler] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -22,7 +22,7 @@ defmodule ExampleJsonParse.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:domo, ">= 1.3.4"},
+      {:domo, "~> 1.5"},
       {:jason, "~> 1.2"},
       {:exjsonpath, "~> 0.1"},
       {:nestru, ">= 0.0.0"}
