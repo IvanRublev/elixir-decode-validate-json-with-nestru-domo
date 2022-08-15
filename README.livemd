@@ -1,0 +1,433 @@
+# Decoding and validating a JSON file into nested structs with Nestru and Domo
+
+```elixir
+Mix.install(
+  [:tesla, :jason, :ex_json_schema, :nestru, :domo],
+  force: true,
+  consolidate_protocols: false
+)
+
+base_uri =
+  URI.new!(
+    "https://raw.githubusercontent.com/IvanRublev/elixir-decode-validate-json-with-nestru-domo/master/"
+  )
+```
+
+## Problem
+
+<!-- livebook:{"persist_outputs":true} -->
+
+<p align="center" class="hidden">
+  <a href="https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2FIvanRublev%2Felixir-decode-validate-json-with-nestru-domo%2Fblob%2Fmaster%2FREADME.livemd">
+    <img src="https://livebook.dev/badge/v1/blue.svg" alt="Run in Livebook" />
+  </a>
+</p>
+
+JSON data format is widespread for many types of web-application interfaces. For example, HTTP endpoints or distributed queues serve messages of that format. Though JSON schema is there for data types validation, some custom code is still required to shape the JSON message into the nested structs and validate the data model's interdependent fields by meaning.
+
+On a high level, the end-to-end deserialization process has three tasks: input data format validation, data shaping into the nested structs, and model validation. The first can be solved by [`ex_json_schema`](https://hex.pm/packages/ex_json_schema)  library with a [JSON schema](http://json-schema.org/) as a configuration file. And what about the last two?
+
+<!-- livebook:{"break_markdown":true} -->
+
+<!-- Learn more at https://mermaid-js.github.io/mermaid -->
+
+```mermaid
+graph LR;
+  subgraph data_format_validation ["Data format validation"]
+    JsonMap["JSON binary decoded (Jason)"] --> MapValidated["map validated (ex_json_schema)"]
+  end
+  subgraph data_shaping ["Data shaping"]
+    MapValidated --> StructDecoded["Structs decoded (Nestru)"]
+  end
+  subgraph logic_validation ["Model validation"]
+    StructDecoded --> ModelValidated["Model validated (Domo)"]
+  end
+  ModelValidated --> ModelProcessed["Model processed"]
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+This article will show how the data shaping into the nested structs and model validation tasks can be automatized by using [`Nestru`](https://hex.pm/packages/nestru) and [`Domo`](https://hex.pm/packages/domo) libraries.
+
+Let's look at how to configure these libraries in the following example.
+
+## Example
+
+### Input data format validation
+
+<!-- livebook:{"break_markdown":true} -->
+
+We download and decode a [product catalogue](https://github.com/IvanRublev/contentful-elixir-parse-example-nestru-domo/blob/to_livemd/product-catalogue.json) JSON binary into a list of maps like that:
+
+```elixir
+catalogue_uri = base_uri |> URI.merge("product-catalogue.json") |> URI.to_string()
+catalogue = catalogue_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!()
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %{
+    "dimensions" => %{"height" => 9.5, "length" => 25.0, "width" => 1.0},
+    "id" => 2,
+    "name" => "An ice sculpture",
+    "price" => 12.5,
+    "tags" => ["cold", "ice"],
+    "warehouseLocation" => %{"latitude" => 40.75, "longitude" => -121.4}
+  },
+  %{
+    "dimensions" => %{"height" => 1.0, "length" => 3.1, "width" => 1.0},
+    "id" => 3,
+    "name" => "A blue mouse",
+    "price" => 25.5,
+    "warehouseLocation" => %{"latitude" => 52.8, "longitude" => 5.5}
+  }
+]
+```
+
+Then download and resolve [the JSON schema](https://github.com/IvanRublev/contentful-elixir-parse-example-nestru-domo/blob/to_livemd/product-catalogue.schema.json) the same way:
+
+```elixir
+schema_uri = base_uri |> URI.merge("product-catalogue.schema.json") |> URI.to_string()
+
+schema =
+  schema_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%ExJsonSchema.Schema.Root{
+  custom_format_validator: nil,
+  definitions: %{},
+  location: :root,
+  refs: %{},
+  schema: %{
+    "$schema" => "http://json-schema.org/draft-04/schema#",
+    "items" => %{
+      "properties" => %{
+        "dimensions" => %{
+          "properties" => %{
+            "height" => %{"type" => "number"},
+            "length" => %{"type" => "number"},
+            "width" => %{"type" => "number"}
+          },
+          "required" => ["length", "width", "height"],
+          "type" => "object"
+        },
+        "id" => %{"description" => "The unique identifier for a product", "type" => "number"},
+        "name" => %{"type" => "string"},
+        "price" => %{"exclusiveMinimum" => true, "minimum" => 0, "type" => "number"},
+        "tags" => %{
+          "items" => %{"type" => "string"},
+          "minItems" => 1,
+          "type" => "array",
+          "uniqueItems" => true
+        },
+        "warehouseLocation" => %{
+          "description" => "Coordinates of the warehouse with the product",
+          "properties" => %{
+            "latitude" => %{"type" => "number"},
+            "longitude" => %{"type" => "number"}
+          },
+          "required" => ["latitude", "longitude"],
+          "type" => "object"
+        }
+      },
+      "required" => ["id", "name", "price", "warehouseLocation"],
+      "title" => "Product",
+      "type" => "object"
+    },
+    "title" => "Product set",
+    "type" => "array"
+  },
+  version: 4
+}
+```
+
+And validate the data of the map decoded from the input JSON file like the following:
+
+```elixir
+:ok = ExJsonSchema.Validator.validate(schema, catalogue)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+So far, so good! The result is `:ok`, meaning that the input data format matches the schema.
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Data shaping into the nested structs
+
+The maps decoded from the JSON file contain no information about the structure types and their relations. And from the application's business logic perspective, it'll be helpful to represent each map as a `Product` struct with `Dimensions` and `Warehouse` structs nested in it.
+
+```elixir
+defmodule Dimensions do
+  defstruct [:height, :length, :width]
+end
+
+defmodule Warehouse do
+  defstruct [:latitude, :longitude]
+end
+
+defmodule Product do
+  defstruct [:name, :dimensions, :warehouse]
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Product, <<70, 79, 82, 49, 0, 0, 7, ...>>,
+ %Product{dimensions: nil, name: nil, warehouse: nil}}
+```
+
+For the first top-level map from the catalogue list:
+
+```elixir
+Enum.at(catalogue, 0)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%{
+  "dimensions" => %{"height" => 9.5, "length" => 25.0, "width" => 1.0},
+  "id" => 2,
+  "name" => "An ice sculpture",
+  "price" => 12.5,
+  "tags" => ["cold", "ice"],
+  "warehouseLocation" => %{"latitude" => 40.75, "longitude" => -121.4}
+}
+```
+
+we have two impediments to shaping it into an appropriate `Product` struct:
+
+1. There is no `"warehouse"` key in it, only the related `"warehouseLocation"`
+2. We need to cast the map values of the appropriate keys into `Dimensions` and `Warehouse` structs
+
+To address these, we will use the [`Nestru`](https://hex.pm/packages/nestru) library. The first impediment can be resolved by deriving `Nestru.PreDecoder` protocol with keys name mapping, and the second one by deriving `Nestru.Decoder` protocol with the key to struct modules mapping like that:
+
+```elixir
+defmodule Dimensions do
+  @derive Nestru.Decoder
+
+  defstruct [:height, :length, :width]
+end
+
+defmodule Warehouse do
+  @derive Nestru.Decoder
+
+  defstruct [:latitude, :longitude]
+end
+
+defmodule Product do
+  @derive [
+    {Nestru.PreDecoder, %{"warehouseLocation" => :warehouse}},
+    {Nestru.Decoder, %{dimensions: Dimensions, warehouse: Warehouse}}
+  ]
+
+  defstruct [:name, :dimensions, :warehouse]
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Product, <<70, 79, 82, 49, 0, 0, 7, ...>>,
+ %Product{dimensions: nil, name: nil, warehouse: nil}}
+```
+
+And then, we decode the catalogue into the list of `Product` structs with the call to `Nestru.decode_from_list_of_maps/2`:
+
+```elixir
+{:ok, products} = Nestru.decode_from_list_of_maps(catalogue, Product)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok,
+ [
+   %Product{
+     dimensions: %Dimensions{height: 9.5, length: 25.0, width: 1.0},
+     name: "An ice sculpture",
+     warehouse: %Warehouse{latitude: 40.75, longitude: -121.4}
+   },
+   %Product{
+     dimensions: %Dimensions{height: 1.0, length: 3.1, width: 1.0},
+     name: "A blue mouse",
+     warehouse: %Warehouse{latitude: 52.8, longitude: 5.5}
+   }
+ ]}
+```
+
+The map key's values were set to target fields in the struct and cast to specified struct types!
+
+You can find all functions for maps decoding/encoding in the [Nestru documentation](https://hexdocs.pm/nestru/Nestru.html#summary).
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Model validation
+
+The list of `Products` seems to be a valid model to process with business logic. However, let's imagine that we have two model constraints that came from the business side:
+
+1. The company can't process `Products` bigger than 200 m³ volume
+2. It works with `Warehouse's` located in USA and France only
+
+Expressing these constraints with the JSON schema is impossible because calculations of volume and location are required to validate them.
+
+Let's do such kind of validation with [`Domo`](https://hex.pm/packages/domo) library. In order to do so we will add the standard Elixir `t()` [TypeSpecs](https://hexdocs.pm/elixir/typespecs.html) to each struct. And add the calculation constraint validations with `Domo.precond` macro like the following:
+
+```elixir
+defmodule Dimensions do
+  @derive Nestru.Decoder
+  use Domo, skip_defaults: true
+
+  defstruct [:height, :width, :length]
+
+  @type t :: %__MODULE__{height: float(), width: float(), length: float()}
+
+  def volume(%__MODULE__{} = dims), do: dims.height * dims.width * dims.length
+end
+
+defmodule Warehouse do
+  @derive Nestru.Decoder
+  use Domo, skip_defaults: true
+
+  defstruct [:latitude, :longitude]
+
+  @type t :: %__MODULE__{latitude: float(), longitude: float()}
+  precond(t: &usa_or_french_constraint/1)
+
+  @france_box {42.480200, -10.151367, 51.172455, 13.216553}
+  @usa_box {24.396308, -124.848974, 49.384358, -66.885444}
+
+  defp usa_or_french_constraint(warehouse) do
+    coords = {warehouse.latitude, warehouse.longitude}
+
+    if point_in_latlong_box?(coords, @france_box) || point_in_latlong_box?(coords, @usa_box) do
+      :ok
+    else
+      {:error, "Warehouses outside of USA or France are disalowed."}
+    end
+  end
+
+  defp point_in_latlong_box?({lat, long}, {lat_dl, long_dl, lat_tr, long_tr}) do
+    lat_dl <= lat && lat <= lat_tr && long_dl <= long && long <= long_tr
+  end
+end
+
+defmodule Product do
+  @derive [
+    {Nestru.PreDecoder, %{"warehouseLocation" => :warehouse}},
+    {Nestru.Decoder, %{dimensions: Dimensions, warehouse: Warehouse}}
+  ]
+  use Domo, skip_defaults: true
+
+  defstruct [:name, :dimensions, :warehouse]
+
+  @type t :: %__MODULE__{name: String.t(), dimensions: Dimensions.t(), warehouse: Warehouse.t()}
+  precond(t: &volume_constraint/1)
+
+  defp volume_constraint(product) do
+    volume = Dimensions.volume(product.dimensions)
+    if volume <= 200, do: :ok, else: {:error, "Volume can't be > 200 m³ (current: #{volume} m³)"}
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Domo is compiling type ensurer for 1 module (.ex)
+Domo is compiling type ensurer for 1 module (.ex)
+Domo is compiling type ensurer for 1 module (.ex)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Product, <<70, 79, 82, 49, 0, 0, 35, ...>>, {:volume_constraint, 1}}
+```
+
+`Domo` adds `ensure_type/1` function that checks the struct's data matching its `t()` type and fulfilling preconditions to each module where it was used.
+
+We validate each product in the list like the following:
+
+```elixir
+Enum.map(products, &Product.ensure_type(&1))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  error: [t: "Volume can't be > 200 m³ (current: 237.5 m³)"],
+  error: [
+    warehouse: "Invalid value %Warehouse{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
+  ]
+]
+```
+
+There are two errors returned. The first `Product` has a dimensions volume of 237.5 m³ that is disallowed. And the second `Product` has an invalid `warehouse` value that is `Warehouse` struct with coordinates out of the USA or France.
+
+In case of valid products, the `{:ok, value}` tuples will be in the list.
+
+## Wrap-up
+
+Let's do input data format validation, data shaping into the nested structs, and model validation for the product catalogue matching all data format and model constraints like the following:
+
+```elixir
+catalogue_uri = base_uri |> URI.merge("product-catalogue-correct.json") |> URI.to_string()
+catalogue = catalogue_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!()
+
+with :ok <- ExJsonSchema.Validator.validate(schema, catalogue),
+     {:ok, products} <- Nestru.decode_from_list_of_maps(catalogue, Product),
+     check_results = Enum.map(products, &Product.ensure_type(&1)),
+     {valid, []} <- Enum.split_with(check_results, &match?({:ok, _}, &1)) do
+  {:ok, Enum.map(valid, &elem(&1, 1))}
+else
+  {_, invalid} -> {:error, Enum.map(invalid, &elem(&1, 1))}
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok,
+ [
+   %Product{
+     dimensions: %Dimensions{height: 9.5, length: 7.0, width: 1.0},
+     name: "An ice sculpture",
+     warehouse: %Warehouse{latitude: 40.75, longitude: -121.4}
+   },
+   %Product{
+     dimensions: %Dimensions{height: 1.0, length: 3.1, width: 1.0},
+     name: "A blue mouse",
+     warehouse: %Warehouse{latitude: 48.8, longitude: -3.2}
+   }
+ ]}
+```
+
+The returned list of `Products` is ready to go to the application's business logic.
+
+<!-- livebook:{"break_markdown":true} -->
+
+[`Nestru`](https://hex.pm/packages/nestru) is responsible for shaping a received map into the nested structs representing the application's data model. Therefore, it ignores values for non-existing fields and bubbles up any error occurring during the decoding.
+
+[`Domo`](https://hex.pm/packages/domo) validates the nested structs to match their `t()` types and associated precondition functions. It's not catching all corner cases in the business logic because it's not a static type checker. At the same time, it can ensure that high-level model constraints are fulfilled by discarding disallowed data model states at runtime.
+
+<!-- livebook:{"break_markdown":true} -->
+
+---
+
+Ivan Rublev, 2022
+
+* [Twitter](https://twitter.com/LevviBraun)
+* [GitHub](https://github.com/IvanRublev)
