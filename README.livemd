@@ -1,3 +1,5 @@
+<!-- livebook:{"persist_outputs":true} -->
+
 # Decoding and validating a JSON file into nested structs with Nestru and Domo
 
 ```elixir
@@ -11,6 +13,71 @@ base_uri =
   URI.new!(
     "https://raw.githubusercontent.com/IvanRublev/elixir-decode-validate-json-with-nestru-domo/master/"
   )
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Resolving Hex dependencies...
+Resolution completed in 0.07s
+New:
+  decimal 2.0.0
+  domo 1.5.10
+  ex_json_schema 0.9.2
+  jason 1.4.0
+  mime 2.0.3
+  nestru 0.3.2
+  tesla 1.6.0
+* Getting tesla (Hex package)
+* Getting jason (Hex package)
+* Getting ex_json_schema (Hex package)
+* Getting nestru (Hex package)
+* Getting domo (Hex package)
+* Getting decimal (Hex package)
+* Getting mime (Hex package)
+==> decimal
+Compiling 4 files (.ex)
+Generated decimal app
+==> ex_json_schema
+Compiling 39 files (.ex)
+Generated ex_json_schema app
+==> mime
+Compiling 1 file (.ex)
+Generated mime app
+==> domo
+Compiling 33 files (.ex)
+Domo makes type ensures for standard lib modules Date, Date.Range, DateTime, File.Stat, File.Stream, GenEvent.Stream, IO.Stream, Macro.Env, NaiveDateTime, Range, Regex, Task, Time, URI, Version, Decimal.
+Domo is compiling type ensurer for 16 modules (.ex)
+Generated domo app
+==> jason
+Compiling 10 files (.ex)
+Generated jason app
+==> tesla
+Compiling 34 files (.ex)
+warning: Application.get_env/3 is discouraged in the module body, use Application.compile_env/3 instead
+  lib/tesla/middleware/logger.ex:185: Tesla.Middleware.Logger
+
+warning: unused import Bitwise
+  lib/tesla/middleware/retry.ex:51
+
+Generated tesla app
+==> nestru
+Compiling 4 files (.ex)
+Generated nestru app
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%URI{
+  scheme: "https",
+  userinfo: nil,
+  host: "raw.githubusercontent.com",
+  port: 443,
+  path: "/IvanRublev/elixir-decode-validate-json-with-nestru-domo/master/",
+  query: nil,
+  fragment: nil
+}
 ```
 
 ## Problem
@@ -62,6 +129,38 @@ catalogue_uri = base_uri |> URI.merge("product-catalogue.json") |> URI.to_string
 catalogue = catalogue_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!()
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+
+15:21:05.359 [warn] Description: 'Authenticity is not established by certificate path validation'
+     Reason: 'Option {verify, verify_peer} and cacertfile/cacerts is missing'
+
+
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  %{
+    "dimensions" => %{"height" => 9.5, "length" => 25.0, "width" => 1.0},
+    "id" => 2,
+    "name" => "An ice sculpture",
+    "price" => 12.5,
+    "tags" => ["cold", "ice"],
+    "warehouseLocation" => %{"latitude" => 40.75, "longitude" => -121.4}
+  },
+  %{
+    "dimensions" => %{"height" => 1.0, "length" => 3.1, "width" => 1.0},
+    "id" => 3,
+    "name" => "A blue mouse",
+    "price" => 25.5,
+    "warehouseLocation" => %{"latitude" => 52.8, "longitude" => 5.5}
+  }
+]
+```
+
 Then download and resolve [the JSON schema](https://github.com/IvanRublev/contentful-elixir-parse-example-nestru-domo/blob/to_livemd/product-catalogue.schema.json) the same way:
 
 ```elixir
@@ -71,10 +170,67 @@ schema =
   schema_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!() |> ExJsonSchema.Schema.resolve()
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+%ExJsonSchema.Schema.Root{
+  schema: %{
+    "$schema" => "http://json-schema.org/draft-04/schema#",
+    "items" => %{
+      "properties" => %{
+        "dimensions" => %{
+          "properties" => %{
+            "height" => %{"type" => "number"},
+            "length" => %{"type" => "number"},
+            "width" => %{"type" => "number"}
+          },
+          "required" => ["length", "width", "height"],
+          "type" => "object"
+        },
+        "id" => %{"description" => "The unique identifier for a product", "type" => "number"},
+        "name" => %{"type" => "string"},
+        "price" => %{"exclusiveMinimum" => true, "minimum" => 0, "type" => "number"},
+        "tags" => %{
+          "items" => %{"type" => "string"},
+          "minItems" => 1,
+          "type" => "array",
+          "uniqueItems" => true
+        },
+        "warehouseLocation" => %{
+          "description" => "Coordinates of the warehouse with the product",
+          "properties" => %{
+            "latitude" => %{"type" => "number"},
+            "longitude" => %{"type" => "number"}
+          },
+          "required" => ["latitude", "longitude"],
+          "type" => "object"
+        }
+      },
+      "required" => ["id", "name", "price", "warehouseLocation"],
+      "title" => "Product",
+      "type" => "object"
+    },
+    "title" => "Product set",
+    "type" => "array"
+  },
+  refs: %{},
+  definitions: %{},
+  location: :root,
+  version: 4,
+  custom_format_validator: nil
+}
+```
+
 And validate the data of the map decoded from the input JSON file like the following:
 
 ```elixir
 :ok = ExJsonSchema.Validator.validate(schema, catalogue)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
 ```
 
 So far, so good! The result is `:ok`, meaning that the input data format matches the schema.
@@ -99,10 +255,30 @@ defmodule ProductStruct do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+{:module, ProductStruct, <<70, 79, 82, 49, 0, 0, 8, ...>>,
+ %ProductStruct{name: nil, dimensions: nil, warehouse: nil}}
+```
+
 For the first top-level map from the catalogue list:
 
 ```elixir
 Enum.at(catalogue, 0)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%{
+  "dimensions" => %{"height" => 9.5, "length" => 25.0, "width" => 1.0},
+  "id" => 2,
+  "name" => "An ice sculpture",
+  "price" => 12.5,
+  "tags" => ["cold", "ice"],
+  "warehouseLocation" => %{"latitude" => 40.75, "longitude" => -121.4}
+}
 ```
 
 we have two impediments to shaping it into an appropriate `Product` struct:
@@ -135,10 +311,35 @@ defmodule ProductDecoder do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+{:module, ProductDecoder, <<70, 79, 82, 49, 0, 0, 9, ...>>,
+ %ProductDecoder{name: nil, dimensions: nil, warehouse: nil}}
+```
+
 And then, we decode the catalogue into the list of `Product` structs with the call to `Nestru.decode_from_list_of_maps/2`:
 
 ```elixir
 {:ok, products} = Nestru.decode_from_list_of_maps(catalogue, ProductDecoder)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok,
+ [
+   %ProductDecoder{
+     name: "An ice sculpture",
+     dimensions: %DimensionsDecoder{height: 9.5, length: 25.0, width: 1.0},
+     warehouse: %WarehouseDecoder{latitude: 40.75, longitude: -121.4}
+   },
+   %ProductDecoder{
+     name: "A blue mouse",
+     dimensions: %DimensionsDecoder{height: 1.0, length: 3.1, width: 1.0},
+     warehouse: %WarehouseDecoder{latitude: 52.8, longitude: 5.5}
+   }
+ ]}
 ```
 
 The map key's values were set to target fields in the struct and cast to specified struct types!
@@ -216,6 +417,20 @@ defmodule Product do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+Domo is compiling type ensurer for 1 module (.ex)
+Domo is compiling type ensurer for 1 module (.ex)
+Domo is compiling type ensurer for 1 module (.ex)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Product, <<70, 79, 82, 49, 0, 0, 36, ...>>, {:volume_constraint, 1}}
+```
+
 `Domo` adds `ensure_type/1` function that checks the struct's data matching its `t()` type and fulfilling preconditions to each module where it was used.
 
 We validate each product in the list like the following:
@@ -223,6 +438,17 @@ We validate each product in the list like the following:
 ```elixir
 {:ok, products} = Nestru.decode_from_list_of_maps(catalogue, Product)
 Enum.map(products, &Product.ensure_type(&1))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  error: [t: "Volume can't be > 200 m³ (current: 237.5 m³)"],
+  error: [
+    warehouse: "Invalid value %Warehouse{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
+  ]
+]
 ```
 
 There are two errors returned. The first `Product` has a dimensions volume of 237.5 m³ that is disallowed. And the second `Product` has an invalid `warehouse` value that is `Warehouse` struct with coordinates out of the USA or France.
@@ -245,6 +471,24 @@ with :ok <- ExJsonSchema.Validator.validate(schema, catalogue),
 else
   {_, invalid} -> {:error, Enum.map(invalid, &elem(&1, 1))}
 end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok,
+ [
+   %Product{
+     name: "An ice sculpture",
+     dimensions: %Dimensions{height: 9.5, width: 1.0, length: 7.0},
+     warehouse: %Warehouse{latitude: 40.75, longitude: -121.4}
+   },
+   %Product{
+     name: "A blue mouse",
+     dimensions: %Dimensions{height: 1.0, width: 1.0, length: 3.1},
+     warehouse: %Warehouse{latitude: 48.8, longitude: -3.2}
+   }
+ ]}
 ```
 
 The returned list of `Products` is ready to go to the application's business logic.
