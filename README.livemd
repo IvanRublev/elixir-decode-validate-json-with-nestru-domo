@@ -1,3 +1,5 @@
+<!-- livebook:{"persist_outputs":true} -->
+
 # Decoding and validating a JSON file into nested structs with Nestru and Domo
 
 ```elixir
@@ -13,9 +15,21 @@ base_uri =
   )
 ```
 
-## Problem
+<!-- livebook:{"output":true} -->
 
-<!-- livebook:{"persist_outputs":true} -->
+```
+%URI{
+  scheme: "https",
+  userinfo: nil,
+  host: "raw.githubusercontent.com",
+  port: 443,
+  path: "/IvanRublev/elixir-decode-validate-json-with-nestru-domo/master/",
+  query: nil,
+  fragment: nil
+}
+```
+
+## Problem
 
 <p align="center" class="hidden">
   <a href="https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2FIvanRublev%2Felixir-decode-validate-json-with-nestru-domo%2Fblob%2Fmaster%2FREADME.livemd">
@@ -99,10 +113,6 @@ schema =
 
 ```
 %ExJsonSchema.Schema.Root{
-  custom_format_validator: nil,
-  definitions: %{},
-  location: :root,
-  refs: %{},
   schema: %{
     "$schema" => "http://json-schema.org/draft-04/schema#",
     "items" => %{
@@ -142,7 +152,11 @@ schema =
     "title" => "Product set",
     "type" => "array"
   },
-  version: 4
+  refs: %{},
+  definitions: %{},
+  location: :root,
+  version: 4,
+  custom_format_validator: nil
 }
 ```
 
@@ -166,7 +180,7 @@ So far, so good! The result is `:ok`, meaning that the input data format matches
 
 The maps decoded from the JSON file contain no information about the structure types and their relations. And from the application's business logic perspective, it'll be helpful to represent each map as a `Product` struct with `Dimensions` and `Warehouse` structs nested in it.
 
-```elixir
+```
 defmodule Dimensions do
   defstruct [:height, :length, :width]
 end
@@ -178,13 +192,6 @@ end
 defmodule Product do
   defstruct [:name, :dimensions, :warehouse]
 end
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-{:module, Product, <<70, 79, 82, 49, 0, 0, 7, ...>>,
- %Product{dimensions: nil, name: nil, warehouse: nil}}
 ```
 
 For the first top-level map from the catalogue list:
@@ -228,19 +235,12 @@ end
 
 defmodule Product do
   @derive [
-    {Nestru.PreDecoder, %{"warehouseLocation" => :warehouse}},
-    {Nestru.Decoder, %{dimensions: Dimensions, warehouse: Warehouse}}
+    {Nestru.PreDecoder, translate: %{"warehouseLocation" => :warehouse}},
+    {Nestru.Decoder, hint: %{dimensions: Dimensions, warehouse: Warehouse}}
   ]
 
   defstruct [:name, :dimensions, :warehouse]
 end
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-{:module, Product, <<70, 79, 82, 49, 0, 0, 7, ...>>,
- %Product{dimensions: nil, name: nil, warehouse: nil}}
 ```
 
 And then, we decode the catalogue into the list of `Product` structs with the call to `Nestru.decode_from_list_of_maps/2`:
@@ -255,13 +255,13 @@ And then, we decode the catalogue into the list of `Product` structs with the ca
 {:ok,
  [
    %Product{
-     dimensions: %Dimensions{height: 9.5, length: 25.0, width: 1.0},
      name: "An ice sculpture",
+     dimensions: %Dimensions{height: 9.5, length: 25.0, width: 1.0},
      warehouse: %Warehouse{latitude: 40.75, longitude: -121.4}
    },
    %Product{
-     dimensions: %Dimensions{height: 1.0, length: 3.1, width: 1.0},
      name: "A blue mouse",
+     dimensions: %Dimensions{height: 1.0, length: 3.1, width: 1.0},
      warehouse: %Warehouse{latitude: 52.8, longitude: 5.5}
    }
  ]}
@@ -275,17 +275,17 @@ You can find all functions for maps decoding/encoding in the [Nestru documentati
 
 ### Model validation
 
-The list of `Products` seems to be a valid model to process with business logic. However, let's imagine that we have two model constraints that came from the business side:
+The list of `Product`s seems to be a valid model to process with business logic. However, let's imagine that we have two model constraints that came from the business side:
 
-1. The company can't process `Products` bigger than 200 m³ volume
-2. It works with `Warehouse's` located in USA and France only
+1. The company can't process `Product`s bigger than 200 m³ volume
+2. It works with `Warehouse`'s located in USA and France only
 
 Expressing these constraints with the JSON schema is impossible because calculations of volume and location are required to validate them.
 
 Let's do such kind of validation with [`Domo`](https://hex.pm/packages/domo) library. In order to do so we will add the standard Elixir `t()` [TypeSpecs](https://hexdocs.pm/elixir/typespecs.html) to each struct. And add the calculation constraint validations with `Domo.precond` macro like the following:
 
 ```elixir
-defmodule Dimensions do
+defmodule Dimensions1 do
   @derive Nestru.Decoder
   use Domo, skip_defaults: true
 
@@ -296,7 +296,7 @@ defmodule Dimensions do
   def volume(%__MODULE__{} = dims), do: dims.height * dims.width * dims.length
 end
 
-defmodule Warehouse do
+defmodule Warehouse1 do
   @derive Nestru.Decoder
   use Domo, skip_defaults: true
 
@@ -323,37 +323,23 @@ defmodule Warehouse do
   end
 end
 
-defmodule Product do
+defmodule Product1 do
   @derive [
-    {Nestru.PreDecoder, %{"warehouseLocation" => :warehouse}},
-    {Nestru.Decoder, %{dimensions: Dimensions, warehouse: Warehouse}}
+    {Nestru.PreDecoder, translate: %{"warehouseLocation" => :warehouse}},
+    {Nestru.Decoder, hint: %{dimensions: Dimensions1, warehouse: Warehouse1}}
   ]
   use Domo, skip_defaults: true
 
   defstruct [:name, :dimensions, :warehouse]
 
-  @type t :: %__MODULE__{name: String.t(), dimensions: Dimensions.t(), warehouse: Warehouse.t()}
+  @type t :: %__MODULE__{name: String.t(), dimensions: Dimensions1.t(), warehouse: Warehouse1.t()}
   precond(t: &volume_constraint/1)
 
   defp volume_constraint(product) do
-    volume = Dimensions.volume(product.dimensions)
+    volume = Dimensions1.volume(product.dimensions)
     if volume <= 200, do: :ok, else: {:error, "Volume can't be > 200 m³ (current: #{volume} m³)"}
   end
 end
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-Domo is compiling type ensurer for 1 module (.ex)
-Domo is compiling type ensurer for 1 module (.ex)
-Domo is compiling type ensurer for 1 module (.ex)
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-{:module, Product, <<70, 79, 82, 49, 0, 0, 35, ...>>, {:volume_constraint, 1}}
 ```
 
 `Domo` adds `ensure_type/1` function that checks the struct's data matching its `t()` type and fulfilling preconditions to each module where it was used.
@@ -361,7 +347,8 @@ Domo is compiling type ensurer for 1 module (.ex)
 We validate each product in the list like the following:
 
 ```elixir
-Enum.map(products, &Product.ensure_type(&1))
+{:ok, products} = Nestru.decode_from_list_of_maps(catalogue, Product1)
+Enum.map(products, &Product1.ensure_type(&1))
 ```
 
 <!-- livebook:{"output":true} -->
@@ -370,12 +357,12 @@ Enum.map(products, &Product.ensure_type(&1))
 [
   error: [t: "Volume can't be > 200 m³ (current: 237.5 m³)"],
   error: [
-    warehouse: "Invalid value %Warehouse{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
+    warehouse: "Invalid value %Warehouse1{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product1{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
   ]
 ]
 ```
 
-There are two errors returned. The first `Product` has a dimensions volume of 237.5 m³ that is disallowed. And the second `Product` has an invalid `warehouse` value that is `Warehouse` struct with coordinates out of the USA or France.
+There are two errors returned. The first `Product1` has a dimensions volume of 237.5 m³ that is disallowed. And the second `Product1` has an invalid `warehouse` value that is `Warehouse1` struct with coordinates out of the USA or France.
 
 In case of valid products, the `{:ok, value}` tuples will be in the list.
 
@@ -388,8 +375,8 @@ catalogue_uri = base_uri |> URI.merge("product-catalogue-correct.json") |> URI.t
 catalogue = catalogue_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!()
 
 with :ok <- ExJsonSchema.Validator.validate(schema, catalogue),
-     {:ok, products} <- Nestru.decode_from_list_of_maps(catalogue, Product),
-     check_results = Enum.map(products, &Product.ensure_type(&1)),
+     {:ok, products} <- Nestru.decode_from_list_of_maps(catalogue, Product1),
+     check_results = Enum.map(products, &Product1.ensure_type(&1)),
      {valid, []} <- Enum.split_with(check_results, &match?({:ok, _}, &1)) do
   {:ok, Enum.map(valid, &elem(&1, 1))}
 else
@@ -402,20 +389,20 @@ end
 ```
 {:ok,
  [
-   %Product{
-     dimensions: %Dimensions{height: 9.5, length: 7.0, width: 1.0},
+   %Product1{
      name: "An ice sculpture",
+     dimensions: %Dimensions{height: 9.5, width: 1.0, length: 7.0},
      warehouse: %Warehouse{latitude: 40.75, longitude: -121.4}
    },
-   %Product{
-     dimensions: %Dimensions{height: 1.0, length: 3.1, width: 1.0},
+   %Product1{
      name: "A blue mouse",
+     dimensions: %Dimensions{height: 1.0, width: 1.0, length: 3.1},
      warehouse: %Warehouse{latitude: 48.8, longitude: -3.2}
    }
  ]}
 ```
 
-The returned list of `Products` is ready to go to the application's business logic.
+The returned list of `Product1` structs is ready to go to the application's business logic.
 
 <!-- livebook:{"break_markdown":true} -->
 
@@ -427,7 +414,7 @@ The returned list of `Products` is ready to go to the application's business log
 
 ---
 
-Ivan Rublev, 2022
+Ivan Rublev at al., 2022-2023
 
 * [Twitter](https://twitter.com/LevviBraun)
 * [GitHub](https://github.com/IvanRublev)
