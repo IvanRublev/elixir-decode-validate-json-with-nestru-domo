@@ -243,10 +243,10 @@ defmodule Product do
 end
 ```
 
-And then, we decode the catalogue into the list of `Product` structs with the call to `Nestru.decode_from_list_of_maps/2`:
+And then, we decode the catalogue into the list of `Product` structs with the call to `Nestru.decode_from_list/2`:
 
 ```elixir
-{:ok, products} = Nestru.decode_from_list_of_maps(catalogue, Product)
+{:ok, products} = Nestru.decode_from_list(catalogue, Product)
 ```
 
 <!-- livebook:{"output":true} -->
@@ -347,7 +347,7 @@ end
 We validate each product in the list like the following:
 
 ```elixir
-{:ok, products} = Nestru.decode_from_list_of_maps(catalogue, Product1)
+{:ok, products} = Nestru.decode_from_list(catalogue, Product1)
 Enum.map(products, &Product1.ensure_type(&1))
 ```
 
@@ -375,7 +375,7 @@ catalogue_uri = base_uri |> URI.merge("product-catalogue-correct.json") |> URI.t
 catalogue = catalogue_uri |> Tesla.get!() |> Map.get(:body) |> Jason.decode!()
 
 with :ok <- ExJsonSchema.Validator.validate(schema, catalogue),
-     {:ok, products} <- Nestru.decode_from_list_of_maps(catalogue, Product1),
+     {:ok, products} <- Nestru.decode_from_list(catalogue, Product1),
      check_results = Enum.map(products, &Product1.ensure_type(&1)),
      {valid, []} <- Enum.split_with(check_results, &match?({:ok, _}, &1)) do
   {:ok, Enum.map(valid, &elem(&1, 1))}
