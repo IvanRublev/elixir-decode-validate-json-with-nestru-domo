@@ -348,18 +348,23 @@ We validate each product in the list like the following:
 
 ```elixir
 {:ok, products} = Nestru.decode_from_list(catalogue, Product1)
-Enum.map(products, &Product1.ensure_type(&1))
+
+products 
+|> Enum.with_index() 
+|> Enum.map(fn {val, idx} -> {idx, Product1.ensure_type(val)} end) 
+|> Enum.into(%{})
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
-[
-  error: [t: "Volume can't be > 200 m³ (current: 237.5 m³)"],
-  error: [
-    warehouse: "Invalid value %Warehouse1{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product1{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
-  ]
-]
+%{
+  0 => {:error, [t: "Volume can't be > 200 m³ (current: 237.5 m³)"]},
+  1 => {:error,
+   [
+     warehouse: "Invalid value %Warehouse1{latitude: 52.8, longitude: 5.5} for field :warehouse of %Product1{}. Value of field :t is invalid due to Warehouses outside of USA or France are disalowed."
+   ]}
+}
 ```
 
 There are two errors returned. The first `Product1` has a dimensions volume of 237.5 m³ that is disallowed. And the second `Product1` has an invalid `warehouse` value that is `Warehouse1` struct with coordinates out of the USA or France.
